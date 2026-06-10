@@ -62,10 +62,10 @@ jobs:
         echo "SIGNED_APK=${SIGNED_APK}" >> $GITHUB_OUTPUT
         echo "APK_VERSION=${DATE}.${SHA_SHORT}" >> $GITHUB_OUTPUT
 
-    - name: create-release
-      uses: softprops/action-gh-release@v1
-      with:
-        token: ${{ secrets.GITHUB_TOKEN }}
-        tag_name: ${{ steps.signapk.outputs.APK_VERSION }}
-        name: Release ${{ steps.signapk.outputs.APK_VERSION }}
-        files: ${{ steps.signapk.outputs.SIGNED_APK }}
+    # - name: create-release
+    #   uses: softprops/action-gh-release@v1
+    #   with:
+    #     token: ${{ secrets.GITHUB_TOKEN }}
+    #     tag_name: ${{ steps.signapk.outputs.APK_VERSION }}
+    #     name: Release ${{ steps.signapk.outputs.APK_VERSION }}
+    #     files: ${{ steps.signapk.outputs.SIGNED_APK }}
