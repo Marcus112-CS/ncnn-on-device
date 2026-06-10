@@ -1,0 +1,41 @@
+# Built application files
+*.apk
+*.aar
+*.ap_
+*.aab
+
+# Files for the ART/Dalvik VM
+*.dex
+
+# Java class files
+*.class
+
+# Generated files
+bin/
+gen/
+out/
+release/
+
+# Gradle files
+.gradle/
+build/
+
+# Local configuration file (sdk path, etc)
+local.properties
+
+# Android Studio / IntelliJ
+.idea/
+*.iml
+.cxx/
+
+# macOS
+.DS_Store
+
+# Native dependencies fetched by scripts/fetch-deps.sh (large, re-downloadable)
+app/src/main/jni/ncnn-*-android-vulkan/
+app/src/main/jni/opencv-mobile-*-android/
+app/src/main/jniLibs/
+
+# Keystore / signing
+*.keystore
+*.jks
