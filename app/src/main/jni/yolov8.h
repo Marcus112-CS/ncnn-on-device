@@ -19,6 +19,8 @@
 
 #include <net.h>
 
+#include <set>
+
 struct KeyPoint
 {
     cv::Point2f p;
@@ -58,42 +60,45 @@ class YOLOv8_det : public YOLOv8
 {
 public:
     virtual int detect(const cv::Mat& rgb, std::vector<Object>& objects);
+
+protected:
+    // class indices to keep; empty = keep all. Applied during detection so a box
+    // is reported whenever a whitelisted class scores above threshold, even if a
+    // non-whitelisted class scored higher for that cell.
+    std::set<int> class_whitelist;
+
+    // confidence threshold; subclasses may lower it (e.g. OIV7's 601 sparse classes).
+    float prob_threshold = 0.25f;
 };
 
+// COCO detection base: draws using the 80-class COCO name table. Subclasses below
+// share this draw and only differ by which class indices they keep (class_whitelist).
 class YOLOv8_det_coco : public YOLOv8_det
 {
 public:
     virtual int draw(cv::Mat& rgb, const std::vector<Object>& objects);
 };
 
-class YOLOv8_det_oiv7 : public YOLOv8_det
+class YOLOv8_det_traffic : public YOLOv8_det_coco
 {
 public:
-    virtual int draw(cv::Mat& rgb, const std::vector<Object>& objects);
+    YOLOv8_det_traffic();
 };
 
-class YOLOv8_seg : public YOLOv8
+class YOLOv8_det_airport : public YOLOv8_det_coco
 {
 public:
-    virtual int detect(const cv::Mat& rgb, std::vector<Object>& objects);
+    YOLOv8_det_airport();
+};
+
+// 安监: dedicated 2-class (helmet, head) detector; raw output, shares YOLOv8_det::detect.
+class YOLOv8_det_helmet : public YOLOv8_det
+{
+public:
     virtual int draw(cv::Mat& rgb, const std::vector<Object>& objects);
 };
 
 class YOLOv8_pose : public YOLOv8
-{
-public:
-    virtual int detect(const cv::Mat& rgb, std::vector<Object>& objects);
-    virtual int draw(cv::Mat& rgb, const std::vector<Object>& objects);
-};
-
-class YOLOv8_cls : public YOLOv8
-{
-public:
-    virtual int detect(const cv::Mat& rgb, std::vector<Object>& objects);
-    virtual int draw(cv::Mat& rgb, const std::vector<Object>& objects);
-};
-
-class YOLOv8_obb : public YOLOv8
 {
 public:
     virtual int detect(const cv::Mat& rgb, std::vector<Object>& objects);

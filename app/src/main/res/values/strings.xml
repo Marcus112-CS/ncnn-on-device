@@ -1,13 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">yolov8ncnn</string>
+    <string name="app_name">翼智视联</string>
     <string-array name="task_array">
-        <item>coco</item>
-        <item>oiv7</item>
-        <item>seg</item>
-        <item>pose</item>
-        <item>cls</item>
-        <item>obb</item>
+        <item>交通</item>
+        <item>机场</item>
+        <item>姿态</item>
+        <item>安监</item>
+    </string-array>
+    <!-- 安监 helmet models ship n/s only (no m); dynamic shape supports 320/480/640 -->
+    <string-array name="model_array_helmet">
+        <item>n-640</item>
+        <item>s-640</item>
+        <item>n-480</item>
+        <item>s-480</item>
+        <item>n-320</item>
+        <item>s-320</item>
     </string-array>
     <string-array name="model_array">
         <item>n-320</item>

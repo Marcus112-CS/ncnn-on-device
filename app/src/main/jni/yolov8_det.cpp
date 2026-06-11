@@ -59,6 +59,8 @@
 #include <opencv2/core/core.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
 
+#include <set>
+
 static inline float intersection_area(const Object& a, const Object& b)
 {
     cv::Rect_<float> inter = a.rect & b.rect;
@@ -152,7 +154,7 @@ static inline float sigmoid(float x)
     return 1.0f / (1.0f + expf(-x));
 }
 
-static void generate_proposals(const ncnn::Mat& pred, int stride, const ncnn::Mat& in_pad, float prob_threshold, std::vector<Object>& objects)
+static void generate_proposals(const ncnn::Mat& pred, int stride, const ncnn::Mat& in_pad, float prob_threshold, const std::set<int>& class_whitelist, std::vector<Object>& objects)
 {
     const int w = in_pad.w;
     const int h = in_pad.h;
@@ -177,6 +179,9 @@ static void generate_proposals(const ncnn::Mat& pred, int stride, const ncnn::Ma
 
                 for (int k = 0; k < num_class; k++)
                 {
+                    if (!class_whitelist.empty() && class_whitelist.find(k) == class_whitelist.end())
+                        continue;
+
                     float s = pred_score[k];
                     if (s > score)
                     {
@@ -248,7 +253,7 @@ static void generate_proposals(const ncnn::Mat& pred, int stride, const ncnn::Ma
     }
 }
 
-static void generate_proposals(const ncnn::Mat& pred, const std::vector<int>& strides, const ncnn::Mat& in_pad, float prob_threshold, std::vector<Object>& objects)
+static void generate_proposals(const ncnn::Mat& pred, const std::vector<int>& strides, const ncnn::Mat& in_pad, float prob_threshold, const std::set<int>& class_whitelist, std::vector<Object>& objects)
 {
     const int w = in_pad.w;
     const int h = in_pad.h;
@@ -262,7 +267,7 @@ static void generate_proposals(const ncnn::Mat& pred, const std::vector<int>& st
         const int num_grid_y = h / stride;
         const int num_grid = num_grid_x * num_grid_y;
 
-        generate_proposals(pred.row_range(pred_row_offset, num_grid), stride, in_pad, prob_threshold, objects);
+        generate_proposals(pred.row_range(pred_row_offset, num_grid), stride, in_pad, prob_threshold, class_whitelist, objects);
         pred_row_offset += num_grid;
     }
 }
@@ -270,7 +275,6 @@ static void generate_proposals(const ncnn::Mat& pred, const std::vector<int>& st
 int YOLOv8_det::detect(const cv::Mat& rgb, std::vector<Object>& objects)
 {
     const int target_size = det_target_size;//640;
-    const float prob_threshold = 0.25f;
     const float nms_threshold = 0.45f;
 
     int img_w = rgb.cols;
@@ -319,7 +323,7 @@ int YOLOv8_det::detect(const cv::Mat& rgb, std::vector<Object>& objects)
     ex.extract("out0", out);
 
     std::vector<Object> proposals;
-    generate_proposals(out, strides, in_pad, prob_threshold, proposals);
+    generate_proposals(out, strides, in_pad, prob_threshold, class_whitelist, proposals);
 
     // sort all proposals by score from highest to lowest
     qsort_descent_inplace(proposals);
@@ -364,6 +368,29 @@ int YOLOv8_det::detect(const cv::Mat& rgb, std::vector<Object>& objects)
     std::sort(objects.begin(), objects.end(), objects_area_greater);
 
     return 0;
+}
+
+YOLOv8_det_traffic::YOLOv8_det_traffic()
+{
+    // 交通: keep these COCO class indices
+    class_whitelist = {
+        0, // person
+        1, // bicycle
+        2, // car
+        3, // motorcycle
+        5, // bus
+        9, // traffic light
+    };
+}
+
+YOLOv8_det_airport::YOLOv8_det_airport()
+{
+    // 机场: keep these COCO class indices
+    class_whitelist = {
+        28, // suitcase
+        63, // laptop
+        67, // cell phone
+    };
 }
 
 int YOLOv8_det_coco::draw(cv::Mat& rgb, const std::vector<Object>& objects)
@@ -436,116 +463,20 @@ int YOLOv8_det_coco::draw(cv::Mat& rgb, const std::vector<Object>& objects)
     return 0;
 }
 
-int YOLOv8_det_oiv7::draw(cv::Mat& rgb, const std::vector<Object>& objects)
+int YOLOv8_det_helmet::draw(cv::Mat& rgb, const std::vector<Object>& objects)
 {
-    static const char* class_names[] = {
-        "Accordion", "Adhesive tape", "Aircraft", "Airplane", "Alarm clock", "Alpaca", "Ambulance", "Animal",
-        "Ant", "Antelope", "Apple", "Armadillo", "Artichoke", "Auto part", "Axe", "Backpack", "Bagel",
-        "Baked goods", "Balance beam", "Ball", "Balloon", "Banana", "Band-aid", "Banjo", "Barge", "Barrel",
-        "Baseball bat", "Baseball glove", "Bat (Animal)", "Bathroom accessory", "Bathroom cabinet", "Bathtub",
-        "Beaker", "Bear", "Bed", "Bee", "Beehive", "Beer", "Beetle", "Bell pepper", "Belt", "Bench", "Bicycle",
-        "Bicycle helmet", "Bicycle wheel", "Bidet", "Billboard", "Billiard table", "Binoculars", "Bird",
-        "Blender", "Blue jay", "Boat", "Bomb", "Book", "Bookcase", "Boot", "Bottle", "Bottle opener",
-        "Bow and arrow", "Bowl", "Bowling equipment", "Box", "Boy", "Brassiere", "Bread", "Briefcase",
-        "Broccoli", "Bronze sculpture", "Brown bear", "Building", "Bull", "Burrito", "Bus", "Bust", "Butterfly",
-        "Cabbage", "Cabinetry", "Cake", "Cake stand", "Calculator", "Camel", "Camera", "Can opener", "Canary",
-        "Candle", "Candy", "Cannon", "Canoe", "Cantaloupe", "Car", "Carnivore", "Carrot", "Cart", "Cassette deck",
-        "Castle", "Cat", "Cat furniture", "Caterpillar", "Cattle", "Ceiling fan", "Cello", "Centipede",
-        "Chainsaw", "Chair", "Cheese", "Cheetah", "Chest of drawers", "Chicken", "Chime", "Chisel", "Chopsticks",
-        "Christmas tree", "Clock", "Closet", "Clothing", "Coat", "Cocktail", "Cocktail shaker", "Coconut",
-        "Coffee", "Coffee cup", "Coffee table", "Coffeemaker", "Coin", "Common fig", "Common sunflower",
-        "Computer keyboard", "Computer monitor", "Computer mouse", "Container", "Convenience store", "Cookie",
-        "Cooking spray", "Corded phone", "Cosmetics", "Couch", "Countertop", "Cowboy hat", "Crab", "Cream",
-        "Cricket ball", "Crocodile", "Croissant", "Crown", "Crutch", "Cucumber", "Cupboard", "Curtain",
-        "Cutting board", "Dagger", "Dairy Product", "Deer", "Desk", "Dessert", "Diaper", "Dice", "Digital clock",
-        "Dinosaur", "Dishwasher", "Dog", "Dog bed", "Doll", "Dolphin", "Door", "Door handle", "Doughnut",
-        "Dragonfly", "Drawer", "Dress", "Drill (Tool)", "Drink", "Drinking straw", "Drum", "Duck", "Dumbbell",
-        "Eagle", "Earrings", "Egg (Food)", "Elephant", "Envelope", "Eraser", "Face powder", "Facial tissue holder",
-        "Falcon", "Fashion accessory", "Fast food", "Fax", "Fedora", "Filing cabinet", "Fire hydrant",
-        "Fireplace", "Fish", "Flag", "Flashlight", "Flower", "Flowerpot", "Flute", "Flying disc", "Food",
-        "Food processor", "Football", "Football helmet", "Footwear", "Fork", "Fountain", "Fox", "French fries",
-        "French horn", "Frog", "Fruit", "Frying pan", "Furniture", "Garden Asparagus", "Gas stove", "Giraffe",
-        "Girl", "Glasses", "Glove", "Goat", "Goggles", "Goldfish", "Golf ball", "Golf cart", "Gondola",
-        "Goose", "Grape", "Grapefruit", "Grinder", "Guacamole", "Guitar", "Hair dryer", "Hair spray", "Hamburger",
-        "Hammer", "Hamster", "Hand dryer", "Handbag", "Handgun", "Harbor seal", "Harmonica", "Harp",
-        "Harpsichord", "Hat", "Headphones", "Heater", "Hedgehog", "Helicopter", "Helmet", "High heels",
-        "Hiking equipment", "Hippopotamus", "Home appliance", "Honeycomb", "Horizontal bar", "Horse", "Hot dog",
-        "House", "Houseplant", "Human arm", "Human beard", "Human body", "Human ear", "Human eye", "Human face",
-        "Human foot", "Human hair", "Human hand", "Human head", "Human leg", "Human mouth", "Human nose",
-        "Humidifier", "Ice cream", "Indoor rower", "Infant bed", "Insect", "Invertebrate", "Ipod", "Isopod",
-        "Jacket", "Jacuzzi", "Jaguar (Animal)", "Jeans", "Jellyfish", "Jet ski", "Jug", "Juice", "Kangaroo",
-        "Kettle", "Kitchen & dining room table", "Kitchen appliance", "Kitchen knife", "Kitchen utensil",
-        "Kitchenware", "Kite", "Knife", "Koala", "Ladder", "Ladle", "Ladybug", "Lamp", "Land vehicle",
-        "Lantern", "Laptop", "Lavender (Plant)", "Lemon", "Leopard", "Light bulb", "Light switch", "Lighthouse",
-        "Lily", "Limousine", "Lion", "Lipstick", "Lizard", "Lobster", "Loveseat", "Luggage and bags", "Lynx",
-        "Magpie", "Mammal", "Man", "Mango", "Maple", "Maracas", "Marine invertebrates", "Marine mammal",
-        "Measuring cup", "Mechanical fan", "Medical equipment", "Microphone", "Microwave oven", "Milk",
-        "Miniskirt", "Mirror", "Missile", "Mixer", "Mixing bowl", "Mobile phone", "Monkey", "Moths and butterflies",
-        "Motorcycle", "Mouse", "Muffin", "Mug", "Mule", "Mushroom", "Musical instrument", "Musical keyboard",
-        "Nail (Construction)", "Necklace", "Nightstand", "Oboe", "Office building", "Office supplies", "Orange",
-        "Organ (Musical Instrument)", "Ostrich", "Otter", "Oven", "Owl", "Oyster", "Paddle", "Palm tree",
-        "Pancake", "Panda", "Paper cutter", "Paper towel", "Parachute", "Parking meter", "Parrot", "Pasta",
-        "Pastry", "Peach", "Pear", "Pen", "Pencil case", "Pencil sharpener", "Penguin", "Perfume", "Person",
-        "Personal care", "Personal flotation device", "Piano", "Picnic basket", "Picture frame", "Pig",
-        "Pillow", "Pineapple", "Pitcher (Container)", "Pizza", "Pizza cutter", "Plant", "Plastic bag", "Plate",
-        "Platter", "Plumbing fixture", "Polar bear", "Pomegranate", "Popcorn", "Porch", "Porcupine", "Poster",
-        "Potato", "Power plugs and sockets", "Pressure cooker", "Pretzel", "Printer", "Pumpkin", "Punching bag",
-        "Rabbit", "Raccoon", "Racket", "Radish", "Ratchet (Device)", "Raven", "Rays and skates", "Red panda",
-        "Refrigerator", "Remote control", "Reptile", "Rhinoceros", "Rifle", "Ring binder", "Rocket",
-        "Roller skates", "Rose", "Rugby ball", "Ruler", "Salad", "Salt and pepper shakers", "Sandal",
-        "Sandwich", "Saucer", "Saxophone", "Scale", "Scarf", "Scissors", "Scoreboard", "Scorpion",
-        "Screwdriver", "Sculpture", "Sea lion", "Sea turtle", "Seafood", "Seahorse", "Seat belt", "Segway",
-        "Serving tray", "Sewing machine", "Shark", "Sheep", "Shelf", "Shellfish", "Shirt", "Shorts",
-        "Shotgun", "Shower", "Shrimp", "Sink", "Skateboard", "Ski", "Skirt", "Skull", "Skunk", "Skyscraper",
-        "Slow cooker", "Snack", "Snail", "Snake", "Snowboard", "Snowman", "Snowmobile", "Snowplow",
-        "Soap dispenser", "Sock", "Sofa bed", "Sombrero", "Sparrow", "Spatula", "Spice rack", "Spider",
-        "Spoon", "Sports equipment", "Sports uniform", "Squash (Plant)", "Squid", "Squirrel", "Stairs",
-        "Stapler", "Starfish", "Stationary bicycle", "Stethoscope", "Stool", "Stop sign", "Strawberry",
-        "Street light", "Stretcher", "Studio couch", "Submarine", "Submarine sandwich", "Suit", "Suitcase",
-        "Sun hat", "Sunglasses", "Surfboard", "Sushi", "Swan", "Swim cap", "Swimming pool", "Swimwear",
-        "Sword", "Syringe", "Table", "Table tennis racket", "Tablet computer", "Tableware", "Taco", "Tank",
-        "Tap", "Tart", "Taxi", "Tea", "Teapot", "Teddy bear", "Telephone", "Television", "Tennis ball",
-        "Tennis racket", "Tent", "Tiara", "Tick", "Tie", "Tiger", "Tin can", "Tire", "Toaster", "Toilet",
-        "Toilet paper", "Tomato", "Tool", "Toothbrush", "Torch", "Tortoise", "Towel", "Tower", "Toy",
-        "Traffic light", "Traffic sign", "Train", "Training bench", "Treadmill", "Tree", "Tree house",
-        "Tripod", "Trombone", "Trousers", "Truck", "Trumpet", "Turkey", "Turtle", "Umbrella", "Unicycle",
-        "Van", "Vase", "Vegetable", "Vehicle", "Vehicle registration plate", "Violin", "Volleyball (Ball)",
-        "Waffle", "Waffle iron", "Wall clock", "Wardrobe", "Washing machine", "Waste container", "Watch",
-        "Watercraft", "Watermelon", "Weapon", "Whale", "Wheel", "Wheelchair", "Whisk", "Whiteboard", "Willow",
-        "Window", "Window blind", "Wine", "Wine glass", "Wine rack", "Winter melon", "Wok", "Woman",
-        "Wood-burning stove", "Woodpecker", "Worm", "Wrench", "Zebra", "Zucchini"
-    };
+    static const char* class_names[] = { "helmet", "head" }; // index 0=helmet, 1=head
 
     static cv::Scalar colors[] = {
-        cv::Scalar( 67,  54, 244),
-        cv::Scalar( 30,  99, 233),
-        cv::Scalar( 39, 176, 156),
-        cv::Scalar( 58, 183, 103),
-        cv::Scalar( 81, 181,  63),
-        cv::Scalar(150, 243,  33),
-        cv::Scalar(169, 244,   3),
-        cv::Scalar(188, 212,   0),
-        cv::Scalar(150, 136,   0),
-        cv::Scalar(175,  80,  76),
-        cv::Scalar(195,  74, 139),
-        cv::Scalar(220,  57, 205),
-        cv::Scalar(235,  59, 255),
-        cv::Scalar(193,   7, 255),
-        cv::Scalar(152,   0, 255),
-        cv::Scalar( 87,  34, 255),
-        cv::Scalar( 85,  72, 121),
-        cv::Scalar(158, 158, 158),
-        cv::Scalar(125, 139,  96)
+        cv::Scalar( 56, 176,   0), // helmet - green (compliant)
+        cv::Scalar( 67,  54, 244), // head   - red   (no helmet)
     };
 
     for (size_t i = 0; i < objects.size(); i++)
     {
         const Object& obj = objects[i];
 
-        const cv::Scalar& color = colors[i % 19];
-
-        // fprintf(stderr, "%d = %.5f at %.2f %.2f %.2f x %.2f\n", obj.label, obj.prob,
-                // obj.rect.x, obj.rect.y, obj.rect.width, obj.rect.height);
+        const cv::Scalar& color = colors[obj.label % 2];
 
         cv::rectangle(rgb, obj.rect, color);
 

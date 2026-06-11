@@ -56,58 +56,44 @@ static int draw_unsupported(cv::Mat& rgb)
     return 0;
 }
 
-static int draw_fps(cv::Mat& rgb)
+// latest moving-average FPS, written on the camera thread, read by Java via getFps()
+static float g_fps = 0.f;
+
+static void update_fps()
 {
     // resolve moving average
-    float avg_fps = 0.f;
+    static double t0 = 0.f;
+    static float fps_history[10] = {0.f};
+
+    double t1 = ncnn::get_current_time();
+    if (t0 == 0.f)
     {
-        static double t0 = 0.f;
-        static float fps_history[10] = {0.f};
-
-        double t1 = ncnn::get_current_time();
-        if (t0 == 0.f)
-        {
-            t0 = t1;
-            return 0;
-        }
-
-        float fps = 1000.f / (t1 - t0);
         t0 = t1;
-
-        for (int i = 9; i >= 1; i--)
-        {
-            fps_history[i] = fps_history[i - 1];
-        }
-        fps_history[0] = fps;
-
-        if (fps_history[9] == 0.f)
-        {
-            return 0;
-        }
-
-        for (int i = 0; i < 10; i++)
-        {
-            avg_fps += fps_history[i];
-        }
-        avg_fps /= 10.f;
+        return;
     }
 
-    char text[32];
-    sprintf(text, "FPS=%.2f", avg_fps);
+    float fps = 1000.f / (t1 - t0);
+    t0 = t1;
 
-    int baseLine = 0;
-    cv::Size label_size = cv::getTextSize(text, cv::FONT_HERSHEY_SIMPLEX, 0.5, 1, &baseLine);
+    for (int i = 9; i >= 1; i--)
+    {
+        fps_history[i] = fps_history[i - 1];
+    }
+    fps_history[0] = fps;
 
-    int y = 0;
-    int x = rgb.cols - label_size.width;
+    if (fps_history[9] == 0.f)
+    {
+        return;
+    }
 
-    cv::rectangle(rgb, cv::Rect(cv::Point(x, y), cv::Size(label_size.width, label_size.height + baseLine)),
-                    cv::Scalar(255, 255, 255), -1);
+    float avg_fps = 0.f;
+    for (int i = 0; i < 10; i++)
+    {
+        avg_fps += fps_history[i];
+    }
+    avg_fps /= 10.f;
 
-    cv::putText(rgb, text, cv::Point(x, y + label_size.height),
-                cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 0, 0));
-
-    return 0;
+    g_fps = avg_fps;
 }
 
 static YOLOv8* g_yolov8 = 0;
@@ -138,7 +124,7 @@ void MyNdkCamera::on_image_render(cv::Mat& rgb) const
         }
     }
 
-    draw_fps(rgb);
+    update_fps();
 }
 
 static MyNdkCamera* g_camera = 0;
@@ -174,9 +160,9 @@ JNIEXPORT void JNI_OnUnload(JavaVM* vm, void* reserved)
 }
 
 // public native boolean loadModel(AssetManager mgr, int taskid, int modelid, int cpugpu);
-JNIEXPORT jboolean JNICALL Java_com_tencent_yolov8ncnn_YOLOv8Ncnn_loadModel(JNIEnv* env, jobject thiz, jobject assetManager, jint taskid, jint modelid, jint cpugpu)
+JNIEXPORT jboolean JNICALL Java_com_chinatelecom_yizhishilian_YOLOv8Ncnn_loadModel(JNIEnv* env, jobject thiz, jobject assetManager, jint taskid, jint modelid, jint cpugpu)
 {
-    if (taskid < 0 || taskid > 5 || modelid < 0 || modelid > 8 || cpugpu < 0 || cpugpu > 2)
+    if (taskid < 0 || taskid > 3 || modelid < 0 || modelid > 8 || cpugpu < 0 || cpugpu > 2)
     {
         return JNI_FALSE;
     }
@@ -185,14 +171,11 @@ JNIEXPORT jboolean JNICALL Java_com_tencent_yolov8ncnn_YOLOv8Ncnn_loadModel(JNIE
 
     __android_log_print(ANDROID_LOG_DEBUG, "ncnn", "loadModel %p", mgr);
 
-    const char* tasknames[6] =
+    const char* tasknames[3] =
     {
-        "",
-        "_oiv7",
-        "_seg",
-        "_pose",
-        "_cls",
-        "_obb"
+        "",      // 交通  (COCO model, traffic class whitelist)
+        "",      // 机场  (COCO model, airport class whitelist)
+        "_pose"
     };
 
     const char* modeltypes[9] =
@@ -208,8 +191,12 @@ JNIEXPORT jboolean JNICALL Java_com_tencent_yolov8ncnn_YOLOv8Ncnn_loadModel(JNIE
         "m"
     };
 
-    std::string parampath = std::string("yolov8") + modeltypes[(int)modelid] + tasknames[(int)taskid] + ".ncnn.param";
-    std::string modelpath = std::string("yolov8") + modeltypes[(int)modelid] + tasknames[(int)taskid] + ".ncnn.bin";
+    // 安监 (taskid 3) loads the dedicated helmet models from the helmet-detect/ subfolder;
+    // all other tasks load yolov8<size><tasksuffix> from the assets root.
+    std::string prefix = (taskid == 3) ? std::string("helmet-detect/yolov8") : std::string("yolov8");
+    std::string suffix = (taskid == 3) ? std::string("") : std::string(tasknames[(int)taskid]);
+    std::string parampath = prefix + modeltypes[(int)modelid] + suffix + ".ncnn.param";
+    std::string modelpath = prefix + modeltypes[(int)modelid] + suffix + ".ncnn.bin";
     bool use_gpu = (int)cpugpu == 1;
     bool use_turnip = (int)cpugpu == 2;
 
@@ -244,12 +231,10 @@ JNIEXPORT jboolean JNICALL Java_com_tencent_yolov8ncnn_YOLOv8Ncnn_loadModel(JNIE
 
             if (!g_yolov8)
             {
-                if (taskid == 0) g_yolov8 = new YOLOv8_det_coco;
-                if (taskid == 1) g_yolov8 = new YOLOv8_det_oiv7;
-                if (taskid == 2) g_yolov8 = new YOLOv8_seg;
-                if (taskid == 3) g_yolov8 = new YOLOv8_pose;
-                if (taskid == 4) g_yolov8 = new YOLOv8_cls;
-                if (taskid == 5) g_yolov8 = new YOLOv8_obb;
+                if (taskid == 0) g_yolov8 = new YOLOv8_det_traffic;
+                if (taskid == 1) g_yolov8 = new YOLOv8_det_airport;
+                if (taskid == 2) g_yolov8 = new YOLOv8_pose;
+                if (taskid == 3) g_yolov8 = new YOLOv8_det_helmet;
 
                 g_yolov8->load(mgr, parampath.c_str(), modelpath.c_str(), use_gpu || use_turnip);
             }
@@ -266,7 +251,7 @@ JNIEXPORT jboolean JNICALL Java_com_tencent_yolov8ncnn_YOLOv8Ncnn_loadModel(JNIE
 }
 
 // public native boolean openCamera(int facing);
-JNIEXPORT jboolean JNICALL Java_com_tencent_yolov8ncnn_YOLOv8Ncnn_openCamera(JNIEnv* env, jobject thiz, jint facing)
+JNIEXPORT jboolean JNICALL Java_com_chinatelecom_yizhishilian_YOLOv8Ncnn_openCamera(JNIEnv* env, jobject thiz, jint facing)
 {
     if (facing < 0 || facing > 1)
         return JNI_FALSE;
@@ -279,7 +264,7 @@ JNIEXPORT jboolean JNICALL Java_com_tencent_yolov8ncnn_YOLOv8Ncnn_openCamera(JNI
 }
 
 // public native boolean closeCamera();
-JNIEXPORT jboolean JNICALL Java_com_tencent_yolov8ncnn_YOLOv8Ncnn_closeCamera(JNIEnv* env, jobject thiz)
+JNIEXPORT jboolean JNICALL Java_com_chinatelecom_yizhishilian_YOLOv8Ncnn_closeCamera(JNIEnv* env, jobject thiz)
 {
     __android_log_print(ANDROID_LOG_DEBUG, "ncnn", "closeCamera");
 
@@ -289,7 +274,7 @@ JNIEXPORT jboolean JNICALL Java_com_tencent_yolov8ncnn_YOLOv8Ncnn_closeCamera(JN
 }
 
 // public native boolean setOutputWindow(Surface surface);
-JNIEXPORT jboolean JNICALL Java_com_tencent_yolov8ncnn_YOLOv8Ncnn_setOutputWindow(JNIEnv* env, jobject thiz, jobject surface)
+JNIEXPORT jboolean JNICALL Java_com_chinatelecom_yizhishilian_YOLOv8Ncnn_setOutputWindow(JNIEnv* env, jobject thiz, jobject surface)
 {
     ANativeWindow* win = ANativeWindow_fromSurface(env, surface);
 
@@ -298,6 +283,12 @@ JNIEXPORT jboolean JNICALL Java_com_tencent_yolov8ncnn_YOLOv8Ncnn_setOutputWindo
     g_camera->set_window(win);
 
     return JNI_TRUE;
+}
+
+// public native float getFps();
+JNIEXPORT jfloat JNICALL Java_com_chinatelecom_yizhishilian_YOLOv8Ncnn_getFps(JNIEnv* env, jobject thiz)
+{
+    return (jfloat)g_fps;
 }
 
 }

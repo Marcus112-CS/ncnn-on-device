@@ -11,8 +11,14 @@ There is no networking; all models ship as APK assets.
 
 ## Build prerequisites (REQUIRED before any build will succeed)
 
-Three native dependencies are **not vendored** in the repo and must be fetched manually.
-Versions are pinned in `app/src/main/jni/CMakeLists.txt` — match them or edit the paths there:
+Three native dependencies are **not vendored** in the repo. Versions are pinned in
+`app/src/main/jni/CMakeLists.txt` — match them or edit the paths there.
+
+**Fastest path:** run `scripts/fetch-deps.sh` from the repo root. It downloads and extracts
+ncnn + opencv-mobile into `app/src/main/jni/` at the versions CMakeLists expects (skips dirs
+that already exist). It does **not** fetch the turnip driver — that stays manual (step 3).
+
+The three dependencies:
 
 1. **ncnn** → extract `ncnn-YYYYMMDD-android-vulkan.zip` into `app/src/main/jni/`.
    CMake currently expects `app/src/main/jni/ncnn-20260526-android-vulkan/`.
@@ -26,6 +32,10 @@ Versions are pinned in `app/src/main/jni/CMakeLists.txt` — match them or edit 
 If a build complains about `find_package(ncnn)` / `find_package(OpenCV)`, the cause is almost
 always a missing or version-mismatched directory above — not a code bug.
 
+The dependency versions live in **three places that must stay in sync**: `CMakeLists.txt`
+(the path strings), `scripts/fetch-deps.sh` (the `*_VERSION` vars), and
+`.github/workflows/release-apk.yml` (the `env:` block). Bumping a version means editing all three.
+
 ## Build & run
 
 ```sh
@@ -38,6 +48,12 @@ always a missing or version-mismatched directory above — not a code bug.
   NDK 29.0.14206865, CMake 3.31.5. `arm64-v8a` is the only meaningful ABI (turnip is arm64-only).
 - There are **no unit/instrumentation tests** in this project. "Testing" means running on a device
   and observing the on-screen detections + FPS overlay.
+
+### Release CI
+`.github/workflows/release-apk.yml` is **manual-only** (`workflow_dispatch`). It fetches all three
+deps (including turnip), rewrites the version strings in `CMakeLists.txt` via `sed`, runs
+`./gradlew assembleRelease`, then self-signs with a throwaway keystore generated in-job. There is no
+CI on push/PR — nothing checks a normal commit, so verify builds locally.
 
 ## Architecture
 
